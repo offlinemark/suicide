@@ -46,7 +46,8 @@ bool Ubouch::runOnFunction(Function &F) {
 }
 
 std::vector<Instruction *> Ubouch::getUb(Function &F) {
-    std::unordered_set<Value *> allocas;
+    std::unordered_set<Value *> raw;
+    std::unordered_set<Value *> unsure;
     std::vector<Instruction *> ubinsts;
     inst_iterator I = inst_begin(F), E = inst_end(F);
 
@@ -54,26 +55,44 @@ std::vector<Instruction *> Ubouch::getUb(Function &F) {
 
     // Collect allocas
     for (; I != E && I->getOpcode() == Instruction::Alloca; I++) {
-        allocas.insert(&*I);
+        raw.insert(&*I);
     }
 
     // Check all other instructions
     for (; I != E; I++) {
         switch (I->getOpcode()) {
-        case Instruction::Store: {
-            StoreInst *store = cast<StoreInst>(&*I);
-            allocas.erase(store->getPointerOperand());
-            break;
-        }
-        case Instruction::Load:
+        case Instruction::Load: {
+            // If loading from a raw, that's ub!
             LoadInst *load = cast<LoadInst>(&*I);
             Value *v = load->getPointerOperand();
-            if (allocas.count(v)) {
-                errs() << "\t> Uninitialized read of `" << v->getName()
+            if (raw.count(v)) {
+                errs() << "\t[!]  SURE: Uninitialized read of `" << v->getName()
+                       << "` ; " << *I << "\n";
+                ubinsts.push_back(load);
+            } else if (unsure.count(v)) {
+                errs() << "\t[?] MAYBE: Uninitialized read of `" << v->getName()
                        << "` ; " << *I << "\n";
                 ubinsts.push_back(load);
             }
             break;
+        }
+        case Instruction::Store: {
+            // If storing to a raw, it's not raw anymore
+            StoreInst *store = cast<StoreInst>(&*I);
+            raw.erase(store->getPointerOperand());
+            break;
+        }
+        case Instruction::Call: {
+            // If passing a raw into a func, it becomes an unsure
+            CallInst *call = cast<CallInst>(&*I);
+            for (const auto &it : call->arg_operands()) {
+                Value *val = &*it;
+                if (raw.count(val)) {
+                    raw.erase(val);
+                    unsure.insert(val);
+                }
+            }
+        }
         }
     }
 
