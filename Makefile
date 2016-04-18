@@ -26,8 +26,10 @@ pass: Ubouch.so
 check:
 	$(OPT) -load ./Ubouch.so -ubouch test.bc -o out.bc
 	$(CXX) -o test out.bc
+	read x
 	@echo === ORIGINAL ===================
 	@cat test.ll
+	read x
 	@echo === OPTIMIZED ===================
 	@$(LLVMDIS) out.bc
 	@cat out.ll
