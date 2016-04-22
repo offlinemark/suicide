@@ -5,9 +5,9 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/SmallSet.h"
 
-#include <unordered_set>
-#include <vector>
+#define ADT_N 64
 
 using namespace llvm;
 
@@ -46,8 +46,8 @@ bool Ubouch::runOnFunction(Function &F) {
 }
 
 std::vector<Instruction *> Ubouch::getUb(Function &F) {
-    std::unordered_set<Value *> raw;
-    std::unordered_set<Value *> unsure;
+    SmallSet<Value *, ADT_N> raw;
+    SmallSet<Value *, ADT_N> unsure;
     std::vector<Instruction *> ubinsts;
     inst_iterator I = inst_begin(F), E = inst_end(F);
 
