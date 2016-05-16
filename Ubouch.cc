@@ -4,8 +4,11 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/ADT/SmallSet.h"
+
+#include <stack>
 
 #define ADT_N 64
 
@@ -24,6 +27,10 @@ struct Ubouch : public FunctionPass {
     std::vector<Instruction *> getUb(Function &F);
     void emitSystemCall(Instruction *ubInst);
     GlobalVariable *declareSystemArg(Module *M);
+    std::vector<Instruction *> getAllocas(Function &F);
+    std::vector<Instruction *> getAllocaUb(Instruction *alloca, Function &F);
+    std::vector<Instruction *> bbubcheck(Instruction *alloca, BasicBlock *BB);
+    bool isTerminatingBB(Instruction *alloca, BasicBlock *BB);
 };
 
 bool Ubouch::runOnFunction(Function &F) {
@@ -45,7 +52,93 @@ bool Ubouch::runOnFunction(Function &F) {
     return true;
 }
 
+std::vector<Instruction *> Ubouch::getAllocas(Function &F) {
+    std::vector<Instruction *> allocas;
+    inst_iterator I = inst_begin(F), E = inst_end(F);
+    for (; I != E && I->getOpcode() == Instruction::Alloca; I++) {
+        allocas.push_back(&*I);
+    }
+    return allocas;
+}
+
+std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca, BasicBlock *BB) {
+    std::vector<Instruction *> ubinsts;
+
+    return ubinsts;
+}
+
+bool Ubouch::isTerminatingBB(Instruction *alloca, BasicBlock *BB) {
+    // Check all other instructions
+    for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; I++) {
+        switch (I->getOpcode()) {
+        case Instruction::Store: {
+            // If storing to a raw, it's not raw anymore
+            StoreInst *store = cast<StoreInst>(&*I);
+            if (store->getPointerOperand() == alloca)
+                return true;
+            break;
+        }
+        }
+    }
+    return false;
+}
+
+
+std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca, Function &F) {
+    std::vector<Instruction *> ubinsts;
+
+    std::stack<BasicBlock *> _dfs_stack;
+
+    // TODO for later, add support for loops
+    //std::unordered_set<BasicBlock *> _dfs_visited;
+
+    _dfs_stack.push(&F.getEntryBlock());
+
+    while (!_dfs_stack.empty()) {
+        BasicBlock *currBB = _dfs_stack.top();
+        _dfs_stack.pop();
+
+        errs() << "DFS IS CURRENTLY IN \n";
+        errs() << *currBB;
+
+        std::vector<Instruction *> bbubinsts = bbubcheck(alloca, currBB);
+        for (int i = 0; i < bbubinsts.size(); i++) {
+            ubinsts.push_back(bbubinsts[i]);
+        }
+
+        // dfs visited add currbb TODO
+
+        if (!isTerminatingBB(alloca, currBB)) {
+        /* if (true) { */
+            for (succ_iterator I = succ_begin(currBB), E = succ_end(currBB);
+                 I != E; I++) {
+                // TODO visited check
+                _dfs_stack.push(*I);
+            }
+        }
+    }
+
+    return ubinsts;
+}
+
 std::vector<Instruction *> Ubouch::getUb(Function &F) {
+    std::vector<Instruction *> allocas = getAllocas(F);
+    std::vector<Instruction *> ubinsts;
+
+    errs() << "[+] Checking " << F.getName() << '\n';
+
+    for (int i = 0; i < allocas.size(); i++) {
+        errs() << "uopp " << *allocas[i] << '\n';
+        std::vector<Instruction *> allocaub = getAllocaUb(allocas[i], F);
+        for (int j = 0; j < allocaub.size(); j++) {
+            ubinsts.push_back(allocaub[j]);
+        }
+    }
+
+    return ubinsts;
+}
+
+std::vector<Instruction *> oldgetUb(Function &F) {
     SmallSet<Value *, ADT_N> raw;
     SmallSet<Value *, ADT_N> unsure;
     std::vector<Instruction *> ubinsts;
