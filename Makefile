@@ -3,7 +3,7 @@ OPT=opt-3.8
 CXX=clang++-3.8
 LLVMDIS=llvm-dis-3.8
 LLVMCONFIG=llvm-config-3.8
-CFLAGS += -Wall --verbose
+CFLAGS += -Wall -fno-rtti
 OUT = test
 
 all: bc ll pass
