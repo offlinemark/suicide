@@ -1,16 +1,14 @@
-#include "llvm/Pass.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/InstIterator.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/CFG.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/SmallSet.h"
 
 #include <stack>
-
-#define ADT_N 64
+#include <unordered_set>
 
 using namespace llvm;
 
@@ -21,7 +19,8 @@ struct Ubouch : public FunctionPass {
     const std::string SYSTEM_ARG = ".system_arg";
     ArrayType *system_arg_type;
 
-    Ubouch() : FunctionPass(ID) {}
+    Ubouch() : FunctionPass(ID) {
+    }
     bool runOnFunction(Function &F) override;
 
     std::vector<Instruction *> getUb(Function &F);
@@ -32,6 +31,20 @@ struct Ubouch : public FunctionPass {
     std::vector<Instruction *> bbubcheck(Instruction *alloca, BasicBlock *BB);
     bool isTerminatingBB(Instruction *alloca, BasicBlock *BB);
 };
+
+void push_successors(std::stack<BasicBlock *> &stack,
+                     const std::unordered_set<BasicBlock *> &visited,
+                     BasicBlock *BB) {
+    for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; I++) {
+        if (!visited.count(*I)) {
+            stack.push(*I);
+        }
+    }
+}
+
+template <typename T> void vec_append(std::vector<T> &a, std::vector<T> &b) {
+    a.insert(a.end(), b.begin(), b.end());
+}
 
 bool Ubouch::runOnFunction(Function &F) {
     Module *M = F.getParent();
@@ -61,18 +74,39 @@ std::vector<Instruction *> Ubouch::getAllocas(Function &F) {
     return allocas;
 }
 
-std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca, BasicBlock *BB) {
+std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca,
+                                             BasicBlock *BB) {
     std::vector<Instruction *> ubinsts;
+
+    for (auto I = BB->begin(), E = BB->end(); I != E; ++I) {
+        switch (I->getOpcode()) {
+        case Instruction::Load: {
+            LoadInst *load = cast<LoadInst>(&*I);
+            Value *op = load->getPointerOperand();
+            if (op == alloca) {
+                errs() << "\t[!]  SURE: Uninitialized read of `"
+                       << op->getName() << "` ; " << *I << "\n";
+                ubinsts.push_back(load);
+            }
+            break;
+        }
+        case Instruction::Store: {
+            StoreInst *store = cast<StoreInst>(&*I);
+            Value *op = store->getPointerOperand();
+            if (op == alloca)
+                return ubinsts;
+            break;
+        }
+        }
+    }
 
     return ubinsts;
 }
 
 bool Ubouch::isTerminatingBB(Instruction *alloca, BasicBlock *BB) {
-    // Check all other instructions
     for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; I++) {
         switch (I->getOpcode()) {
         case Instruction::Store: {
-            // If storing to a raw, it's not raw anymore
             StoreInst *store = cast<StoreInst>(&*I);
             if (store->getPointerOperand() == alloca)
                 return true;
@@ -83,14 +117,11 @@ bool Ubouch::isTerminatingBB(Instruction *alloca, BasicBlock *BB) {
     return false;
 }
 
-
-std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca, Function &F) {
+std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca,
+                                               Function &F) {
     std::vector<Instruction *> ubinsts;
-
     std::stack<BasicBlock *> _dfs_stack;
-
-    // TODO for later, add support for loops
-    //std::unordered_set<BasicBlock *> _dfs_visited;
+    std::unordered_set<BasicBlock *> _dfs_visited;
 
     _dfs_stack.push(&F.getEntryBlock());
 
@@ -98,23 +129,13 @@ std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca, Function &F)
         BasicBlock *currBB = _dfs_stack.top();
         _dfs_stack.pop();
 
-        errs() << "DFS IS CURRENTLY IN \n";
-        errs() << *currBB;
-
         std::vector<Instruction *> bbubinsts = bbubcheck(alloca, currBB);
-        for (int i = 0; i < bbubinsts.size(); i++) {
-            ubinsts.push_back(bbubinsts[i]);
-        }
+        vec_append<Instruction *>(ubinsts, bbubinsts);
 
-        // dfs visited add currbb TODO
+        _dfs_visited.insert(currBB);
 
         if (!isTerminatingBB(alloca, currBB)) {
-        /* if (true) { */
-            for (succ_iterator I = succ_begin(currBB), E = succ_end(currBB);
-                 I != E; I++) {
-                // TODO visited check
-                _dfs_stack.push(*I);
-            }
+            push_successors(_dfs_stack, _dfs_visited, currBB);
         }
     }
 
@@ -127,66 +148,9 @@ std::vector<Instruction *> Ubouch::getUb(Function &F) {
 
     errs() << "[+] Checking " << F.getName() << '\n';
 
-    for (int i = 0; i < allocas.size(); i++) {
-        errs() << "uopp " << *allocas[i] << '\n';
+    for (size_t i = 0; i < allocas.size(); i++) {
         std::vector<Instruction *> allocaub = getAllocaUb(allocas[i], F);
-        for (int j = 0; j < allocaub.size(); j++) {
-            ubinsts.push_back(allocaub[j]);
-        }
-    }
-
-    return ubinsts;
-}
-
-std::vector<Instruction *> oldgetUb(Function &F) {
-    SmallSet<Value *, ADT_N> raw;
-    SmallSet<Value *, ADT_N> unsure;
-    std::vector<Instruction *> ubinsts;
-    inst_iterator I = inst_begin(F), E = inst_end(F);
-
-    errs() << "[+] Checking " << F.getName() << '\n';
-
-    // Collect allocas
-    for (; I != E && I->getOpcode() == Instruction::Alloca; I++) {
-        raw.insert(&*I);
-    }
-
-    // Check all other instructions
-    for (; I != E; I++) {
-        switch (I->getOpcode()) {
-        case Instruction::Load: {
-            // If loading from a raw, that's ub!
-            LoadInst *load = cast<LoadInst>(&*I);
-            Value *v = load->getPointerOperand();
-            if (raw.count(v)) {
-                errs() << "\t[!]  SURE: Uninitialized read of `" << v->getName()
-                       << "` ; " << *I << "\n";
-                ubinsts.push_back(load);
-            } else if (unsure.count(v)) {
-                errs() << "\t[?] MAYBE: Uninitialized read of `" << v->getName()
-                       << "` ; " << *I << "\n";
-                ubinsts.push_back(load);
-            }
-            break;
-        }
-        case Instruction::Store: {
-            // If storing to a raw, it's not raw anymore
-            StoreInst *store = cast<StoreInst>(&*I);
-            raw.erase(store->getPointerOperand());
-            break;
-        }
-        case Instruction::Call: {
-            // If passing a raw into a func, it becomes an unsure
-            CallInst *call = cast<CallInst>(&*I);
-            for (const auto &it : call->arg_operands()) {
-                Value *val = &*it;
-                if (raw.count(val)) {
-                    raw.erase(val);
-                    unsure.insert(val);
-                }
-            }
-        }
-        }
+        vec_append<Instruction *>(ubinsts, allocaub);
     }
 
     return ubinsts;
