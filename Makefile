@@ -1,9 +1,9 @@
-CLANG=clang-3.7
-OPT=opt-3.7
-CXX=clang++-3.7
-LLVMDIS=llvm-dis-3.7
-LLVMCONFIG=llvm-config-3.7
-CFLAGS += -Wall
+CLANG=clang-3.8
+OPT=opt-3.8
+CXX=clang++-3.8
+LLVMDIS=llvm-dis-3.8
+LLVMCONFIG=llvm-config-3.8
+CFLAGS += -Wall --verbose
 OUT = test
 
 all: bc ll pass
