@@ -4,7 +4,7 @@ Undefined behavior, ouch
 
 A common example of something a compiler is permitted to do when it encounters
 undefined behavior is "deleting your hard drive". Ubouch is a LLVM pass which
-implements this for local uses of primitive stack variables.
+implements this for local uses of uninitialized primitive stack variables.
 
 ## demo
 
