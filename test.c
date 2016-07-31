@@ -40,6 +40,20 @@ void paths_unsure(void)
     y += x;
 }
 
+void paths_unsure_multi(void)
+{
+    int x;
+    int y = 0;
+
+    if (y == 1) {
+        dummy(&x);
+    }
+
+    dummy(&x);
+
+    y += x;
+}
+
 // this code causes a bug where an "UNSURE" is reported, but there is an
 // alternate path the is a "SURE". this may occur when the graph traversal
 // encounters a call -> load before the alternative path which goes straight
