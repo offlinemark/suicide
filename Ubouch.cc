@@ -41,8 +41,8 @@ struct Ubouch : public FunctionPass {
 };
 
 void Ubouch::push_successors(std::stack<BasicBlock *> &stack,
-                     const std::unordered_set<BasicBlock *> &visited,
-                     BasicBlock *BB) {
+                             const std::unordered_set<BasicBlock *> &visited,
+                             BasicBlock *BB) {
     for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; I++) {
         if (!visited.count(*I)) {
             stack.push(*I);
@@ -97,9 +97,9 @@ unsigned Ubouch::allocaInCallArgs(CallInst *call, Instruction *alloca) {
 
 void Ubouch::printWarning(StringRef ir_var_name, Instruction *I) {
     errs() << "\t";
-    errs() <<  (state_unknown_dfs_depth ? "[?] UNSURE" : "[!]   SURE");
-    errs() << ": Uninitialized read of `"
-           << ir_var_name << "` ; " << *I << "\n";
+    errs() << (state_unknown_dfs_depth ? "[?] UNSURE" : "[!]   SURE");
+    errs() << ": Uninitialized read of `" << ir_var_name << "` ; " << *I
+           << "\n";
 }
 
 std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca,
