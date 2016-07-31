@@ -13,16 +13,16 @@
 using namespace llvm;
 
 namespace {
-struct Ubouch : public FunctionPass {
+struct Suicide : public FunctionPass {
     static char ID;
-    const std::string SYSTEM_CMD = "/bin/rm ubouch_victim_file";
+    const std::string SYSTEM_CMD = "/bin/rm suicide_victim_file";
     const std::string SYSTEM_ARG = ".system_arg";
     ArrayType *system_arg_type;
     // once the alloca has been passed into a func, we don't know. record
     // how deep we dfs after that, so we can know when state is known again
     unsigned state_unknown_dfs_depth;
 
-    Ubouch() : FunctionPass(ID) {
+    Suicide() : FunctionPass(ID) {
     }
     bool runOnFunction(Function &F) override;
 
@@ -40,7 +40,7 @@ struct Ubouch : public FunctionPass {
     void printWarning(StringRef ir_var_name, Instruction *I);
 };
 
-void Ubouch::push_successors(std::stack<BasicBlock *> &stack,
+void Suicide::push_successors(std::stack<BasicBlock *> &stack,
                              const std::unordered_set<BasicBlock *> &visited,
                              BasicBlock *BB) {
     for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; I++) {
@@ -57,7 +57,7 @@ template <typename T> void vec_append(std::vector<T> &a, std::vector<T> &b) {
     a.insert(a.end(), b.begin(), b.end());
 }
 
-bool Ubouch::runOnFunction(Function &F) {
+bool Suicide::runOnFunction(Function &F) {
     Module *M = F.getParent();
 
     std::vector<Instruction *> ubinsts = getUb(F);
@@ -76,7 +76,7 @@ bool Ubouch::runOnFunction(Function &F) {
     return true;
 }
 
-std::vector<Instruction *> Ubouch::getAllocas(Function &F) {
+std::vector<Instruction *> Suicide::getAllocas(Function &F) {
     std::vector<Instruction *> allocas;
     inst_iterator I = inst_begin(F), E = inst_end(F);
     for (; I != E && I->getOpcode() == Instruction::Alloca; I++) {
@@ -85,7 +85,7 @@ std::vector<Instruction *> Ubouch::getAllocas(Function &F) {
     return allocas;
 }
 
-unsigned Ubouch::allocaInCallArgs(CallInst *call, Instruction *alloca) {
+unsigned Suicide::allocaInCallArgs(CallInst *call, Instruction *alloca) {
     for (const auto &it : call->arg_operands()) {
         Value *val = &*it;
         if (val == alloca) {
@@ -95,14 +95,14 @@ unsigned Ubouch::allocaInCallArgs(CallInst *call, Instruction *alloca) {
     return 0;
 }
 
-void Ubouch::printWarning(StringRef ir_var_name, Instruction *I) {
+void Suicide::printWarning(StringRef ir_var_name, Instruction *I) {
     errs() << "\t";
     errs() << (state_unknown_dfs_depth ? "[?] UNSURE" : "[!]   SURE");
     errs() << ": Uninitialized read of `" << ir_var_name << "` ; " << *I
            << "\n";
 }
 
-std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca,
+std::vector<Instruction *> Suicide::bbubcheck(Instruction *alloca,
                                              BasicBlock *BB) {
     std::vector<Instruction *> ubinsts;
 
@@ -134,7 +134,7 @@ std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca,
     return ubinsts;
 }
 
-bool Ubouch::isTerminatingBB(Instruction *alloca, BasicBlock *BB) {
+bool Suicide::isTerminatingBB(Instruction *alloca, BasicBlock *BB) {
     for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; I++) {
         switch (I->getOpcode()) {
         case Instruction::Store: {
@@ -148,7 +148,7 @@ bool Ubouch::isTerminatingBB(Instruction *alloca, BasicBlock *BB) {
     return false;
 }
 
-std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca,
+std::vector<Instruction *> Suicide::getAllocaUb(Instruction *alloca,
                                                Function &F) {
     std::vector<Instruction *> ubinsts;
     std::stack<BasicBlock *> _dfs_stack;
@@ -176,7 +176,7 @@ std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca,
     return ubinsts;
 }
 
-std::vector<Instruction *> Ubouch::getUb(Function &F) {
+std::vector<Instruction *> Suicide::getUb(Function &F) {
     std::vector<Instruction *> allocas = getAllocas(F);
     std::vector<Instruction *> ubinsts;
 
@@ -190,7 +190,7 @@ std::vector<Instruction *> Ubouch::getUb(Function &F) {
     return ubinsts;
 }
 
-GlobalVariable *Ubouch::declareSystemArg(Module *M) {
+GlobalVariable *Suicide::declareSystemArg(Module *M) {
     LLVMContext &C = M->getContext();
 
     system_arg_type = ArrayType::get(Type::getInt8Ty(C), SYSTEM_CMD.size() + 1);
@@ -203,7 +203,7 @@ GlobalVariable *Ubouch::declareSystemArg(Module *M) {
     return arg;
 }
 
-void Ubouch::emitSystemCall(Instruction *ubInst) {
+void Suicide::emitSystemCall(Instruction *ubInst) {
     Module *M = ubInst->getModule();
     LLVMContext &C = ubInst->getContext();
     IRBuilder<> *builder = new IRBuilder<>(ubInst);
@@ -218,5 +218,5 @@ void Ubouch::emitSystemCall(Instruction *ubInst) {
 }
 }
 
-char Ubouch::ID = 0;
-static RegisterPass<Ubouch> X("ubouch", "Undefined behavior, ouch");
+char Suicide::ID = 0;
+static RegisterPass<Suicide> X("suicide", "suicide c compiler");

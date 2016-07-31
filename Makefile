@@ -10,7 +10,7 @@ all: bc pass
 
 bc: test.bc
 
-pass: Ubouch.so
+pass: Suicide.so
 
 %.bc: %.c
 	$(CLANG) -emit-llvm -c $< -o $@
@@ -20,7 +20,7 @@ pass: Ubouch.so
 	$(CXX) -fPIC -shared $< -o $@ -std=c++11 `$(LLVMCONFIG) --cxxflags` $(CFLAGS)
 
 check:
-	$(OPT) -load ./Ubouch.so -ubouch test.bc -o out.bc
+	$(OPT) -load ./Suicide.so -suicide test.bc -o out.bc
 	$(CXX) -o test out.bc 
 
 

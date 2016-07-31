@@ -1,16 +1,27 @@
-# ubouch
+# suicide cc
 
-Undefined behavior, ouch
+A common illustrative example of something a C compiler is permitted to do when
+it encounters undefined behavior is "deleting your hard drive". Suicide CC is a
+LLVM pass which implements this.
 
-A common example of something a compiler is permitted to do when it encounters
-undefined behavior is "deleting your hard drive". Ubouch is a LLVM pass which
-implements this for local uses of uninitialized primitive stack variables.
+The scope of detected undefined behavior is simply local uses of uninitialized
+stack variables of primitive type. It should support most POSIX like operating
+systems.
+
+This project is named for its similarity to [Suicide
+Linux](https://qntm.org/suicide).
+
+> Note: For the safety of my dev machine, the pass in this source tree is
+declawed such that it will only emit code to delete a very specific file from
+the system executing the program.  However, to achieve the fully advertised
+functionality, simply reassign `Suicide::SYSTEM_CMD` in `Suicide.cc` to your
+choice of hard drive erasing shell command.
 
 ## demo
 
 (slightly out of date)
 
-[![asciicast](https://asciinema.org/a/1mxq4b0kfdx48djx6wk7mg8d9.png)](https://asciinema.org/a/1mxq4b0kfdx48djx6wk7mg8d9)
+[![asciicast](https://asciinema.org/a/1mxq4b0kfdx48djx6wk7mg8d9.png)](https://asciinema.org/a/1mxq4b0kfdx48d9)
 
 ## building
 
@@ -36,6 +47,5 @@ make check
   variable, and a read of it, a pointer to that variable is passed into at
   least one function
 - in some cases, "SURE" warnings might be misclassified as "UNSURE". this
-  occurs when the analysis encounters an "UNSURE" path before a "SURE"
-  path involving the same variable and memory read
-
+  occurs when the analysis encounters an "UNSURE" path before a "SURE" path
+  involving the same variable and memory read
