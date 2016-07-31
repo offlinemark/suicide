@@ -18,6 +18,9 @@ struct Ubouch : public FunctionPass {
     const std::string SYSTEM_CMD = "/bin/rm ubouch_victim_file";
     const std::string SYSTEM_ARG = ".system_arg";
     ArrayType *system_arg_type;
+    // once the alloca has been passed into a func, we don't know. record
+    // how deep we dfs after that, so we can know when state is known again
+    unsigned state_unknown_dfs_depth;
 
     Ubouch() : FunctionPass(ID) {
     }
@@ -30,14 +33,22 @@ struct Ubouch : public FunctionPass {
     std::vector<Instruction *> getAllocaUb(Instruction *alloca, Function &F);
     std::vector<Instruction *> bbubcheck(Instruction *alloca, BasicBlock *BB);
     bool isTerminatingBB(Instruction *alloca, BasicBlock *BB);
+    unsigned allocaInCallArgs(CallInst *call, Instruction *alloca);
+    void push_successors(std::stack<BasicBlock *> &stack,
+                         const std::unordered_set<BasicBlock *> &visited,
+                         BasicBlock *BB);
+    void printWarning(StringRef ir_var_name, Instruction *I);
 };
 
-void push_successors(std::stack<BasicBlock *> &stack,
+void Ubouch::push_successors(std::stack<BasicBlock *> &stack,
                      const std::unordered_set<BasicBlock *> &visited,
                      BasicBlock *BB) {
     for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; I++) {
         if (!visited.count(*I)) {
             stack.push(*I);
+            if (state_unknown_dfs_depth) {
+                state_unknown_dfs_depth++;
+            }
         }
     }
 }
@@ -74,6 +85,23 @@ std::vector<Instruction *> Ubouch::getAllocas(Function &F) {
     return allocas;
 }
 
+unsigned Ubouch::allocaInCallArgs(CallInst *call, Instruction *alloca) {
+    for (const auto &it : call->arg_operands()) {
+        Value *val = &*it;
+        if (val == alloca) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void Ubouch::printWarning(StringRef ir_var_name, Instruction *I) {
+    errs() << "\t";
+    errs() <<  (state_unknown_dfs_depth ? "[?] UNSURE" : "[!]   SURE");
+    errs() << ": Uninitialized read of `"
+           << ir_var_name << "` ; " << *I << "\n";
+}
+
 std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca,
                                              BasicBlock *BB) {
     std::vector<Instruction *> ubinsts;
@@ -84,17 +112,20 @@ std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca,
             LoadInst *load = cast<LoadInst>(&*I);
             Value *op = load->getPointerOperand();
             if (op == alloca) {
-                errs() << "\t[!]  SURE: Uninitialized read of `"
-                       << op->getName() << "` ; " << *I << "\n";
+                printWarning(op->getName(), &*I);
                 ubinsts.push_back(load);
             }
             break;
         }
         case Instruction::Store: {
             StoreInst *store = cast<StoreInst>(&*I);
-            Value *op = store->getPointerOperand();
-            if (op == alloca)
+            if (store->getPointerOperand() == alloca)
                 return ubinsts;
+            break;
+        }
+        case Instruction::Call: {
+            CallInst *call = cast<CallInst>(&*I);
+            state_unknown_dfs_depth = allocaInCallArgs(call, alloca);
             break;
         }
         }
@@ -128,6 +159,9 @@ std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca,
     while (!_dfs_stack.empty()) {
         BasicBlock *currBB = _dfs_stack.top();
         _dfs_stack.pop();
+        if (state_unknown_dfs_depth) {
+            state_unknown_dfs_depth--;
+        }
 
         std::vector<Instruction *> bbubinsts = bbubcheck(alloca, currBB);
         vec_append<Instruction *>(ubinsts, bbubinsts);

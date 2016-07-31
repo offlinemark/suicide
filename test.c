@@ -40,6 +40,25 @@ void paths_unsure(void)
     y += x;
 }
 
+// this code causes a bug where an "UNSURE" is reported, but there is an
+// alternate path the is a "SURE". this may occur when the graph traversal
+// encounters a call -> load before the alternative path which goes straight
+// from alloca to load. this is fundamentally caused by the fact that the
+// traversal visits each basic block exactly once.
+void paths_mislabeling(void)
+{
+    int x;
+    int y = 0;
+
+    if (y == 1) {
+        int z;
+    } else {
+        dummy(&x);
+    }
+
+    y += x;
+}
+
 int main(int argc, const char **argv)
 {
     return 0;
