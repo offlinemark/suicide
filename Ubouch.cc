@@ -1,13 +1,14 @@
-#include "llvm/Pass.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/InstIterator.h"
-#include "llvm/IR/IRBuilder.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/SmallSet.h"
 
-#define ADT_N 64
+#include <stack>
+#include <unordered_set>
 
 using namespace llvm;
 
@@ -17,14 +18,44 @@ struct Ubouch : public FunctionPass {
     const std::string SYSTEM_CMD = "/bin/rm ubouch_victim_file";
     const std::string SYSTEM_ARG = ".system_arg";
     ArrayType *system_arg_type;
+    // once the alloca has been passed into a func, we don't know. record
+    // how deep we dfs after that, so we can know when state is known again
+    unsigned state_unknown_dfs_depth;
 
-    Ubouch() : FunctionPass(ID) {}
+    Ubouch() : FunctionPass(ID) {
+    }
     bool runOnFunction(Function &F) override;
 
     std::vector<Instruction *> getUb(Function &F);
     void emitSystemCall(Instruction *ubInst);
     GlobalVariable *declareSystemArg(Module *M);
+    std::vector<Instruction *> getAllocas(Function &F);
+    std::vector<Instruction *> getAllocaUb(Instruction *alloca, Function &F);
+    std::vector<Instruction *> bbubcheck(Instruction *alloca, BasicBlock *BB);
+    bool isTerminatingBB(Instruction *alloca, BasicBlock *BB);
+    unsigned allocaInCallArgs(CallInst *call, Instruction *alloca);
+    void push_successors(std::stack<BasicBlock *> &stack,
+                         const std::unordered_set<BasicBlock *> &visited,
+                         BasicBlock *BB);
+    void printWarning(StringRef ir_var_name, Instruction *I);
 };
+
+void Ubouch::push_successors(std::stack<BasicBlock *> &stack,
+                     const std::unordered_set<BasicBlock *> &visited,
+                     BasicBlock *BB) {
+    for (succ_iterator I = succ_begin(BB), E = succ_end(BB); I != E; I++) {
+        if (!visited.count(*I)) {
+            stack.push(*I);
+            if (state_unknown_dfs_depth) {
+                state_unknown_dfs_depth++;
+            }
+        }
+    }
+}
+
+template <typename T> void vec_append(std::vector<T> &a, std::vector<T> &b) {
+    a.insert(a.end(), b.begin(), b.end());
+}
 
 bool Ubouch::runOnFunction(Function &F) {
     Module *M = F.getParent();
@@ -45,55 +76,115 @@ bool Ubouch::runOnFunction(Function &F) {
     return true;
 }
 
-std::vector<Instruction *> Ubouch::getUb(Function &F) {
-    SmallSet<Value *, ADT_N> raw;
-    SmallSet<Value *, ADT_N> unsure;
-    std::vector<Instruction *> ubinsts;
+std::vector<Instruction *> Ubouch::getAllocas(Function &F) {
+    std::vector<Instruction *> allocas;
     inst_iterator I = inst_begin(F), E = inst_end(F);
-
-    errs() << "[+] Checking " << F.getName() << '\n';
-
-    // Collect allocas
     for (; I != E && I->getOpcode() == Instruction::Alloca; I++) {
-        raw.insert(&*I);
+        allocas.push_back(&*I);
     }
+    return allocas;
+}
 
-    // Check all other instructions
-    for (; I != E; I++) {
+unsigned Ubouch::allocaInCallArgs(CallInst *call, Instruction *alloca) {
+    for (const auto &it : call->arg_operands()) {
+        Value *val = &*it;
+        if (val == alloca) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void Ubouch::printWarning(StringRef ir_var_name, Instruction *I) {
+    errs() << "\t";
+    errs() <<  (state_unknown_dfs_depth ? "[?] UNSURE" : "[!]   SURE");
+    errs() << ": Uninitialized read of `"
+           << ir_var_name << "` ; " << *I << "\n";
+}
+
+std::vector<Instruction *> Ubouch::bbubcheck(Instruction *alloca,
+                                             BasicBlock *BB) {
+    std::vector<Instruction *> ubinsts;
+
+    for (auto I = BB->begin(), E = BB->end(); I != E; ++I) {
         switch (I->getOpcode()) {
         case Instruction::Load: {
-            // If loading from a raw, that's ub!
             LoadInst *load = cast<LoadInst>(&*I);
-            Value *v = load->getPointerOperand();
-            if (raw.count(v)) {
-                errs() << "\t[!]  SURE: Uninitialized read of `" << v->getName()
-                       << "` ; " << *I << "\n";
-                ubinsts.push_back(load);
-            } else if (unsure.count(v)) {
-                errs() << "\t[?] MAYBE: Uninitialized read of `" << v->getName()
-                       << "` ; " << *I << "\n";
+            Value *op = load->getPointerOperand();
+            if (op == alloca) {
+                printWarning(op->getName(), &*I);
                 ubinsts.push_back(load);
             }
             break;
         }
         case Instruction::Store: {
-            // If storing to a raw, it's not raw anymore
             StoreInst *store = cast<StoreInst>(&*I);
-            raw.erase(store->getPointerOperand());
+            if (store->getPointerOperand() == alloca)
+                return ubinsts;
             break;
         }
         case Instruction::Call: {
-            // If passing a raw into a func, it becomes an unsure
             CallInst *call = cast<CallInst>(&*I);
-            for (const auto &it : call->arg_operands()) {
-                Value *val = &*it;
-                if (raw.count(val)) {
-                    raw.erase(val);
-                    unsure.insert(val);
-                }
-            }
+            state_unknown_dfs_depth = allocaInCallArgs(call, alloca);
+            break;
         }
         }
+    }
+
+    return ubinsts;
+}
+
+bool Ubouch::isTerminatingBB(Instruction *alloca, BasicBlock *BB) {
+    for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; I++) {
+        switch (I->getOpcode()) {
+        case Instruction::Store: {
+            StoreInst *store = cast<StoreInst>(&*I);
+            if (store->getPointerOperand() == alloca)
+                return true;
+            break;
+        }
+        }
+    }
+    return false;
+}
+
+std::vector<Instruction *> Ubouch::getAllocaUb(Instruction *alloca,
+                                               Function &F) {
+    std::vector<Instruction *> ubinsts;
+    std::stack<BasicBlock *> _dfs_stack;
+    std::unordered_set<BasicBlock *> _dfs_visited;
+
+    _dfs_stack.push(&F.getEntryBlock());
+
+    while (!_dfs_stack.empty()) {
+        BasicBlock *currBB = _dfs_stack.top();
+        _dfs_stack.pop();
+        if (state_unknown_dfs_depth) {
+            state_unknown_dfs_depth--;
+        }
+
+        std::vector<Instruction *> bbubinsts = bbubcheck(alloca, currBB);
+        vec_append<Instruction *>(ubinsts, bbubinsts);
+
+        _dfs_visited.insert(currBB);
+
+        if (!isTerminatingBB(alloca, currBB)) {
+            push_successors(_dfs_stack, _dfs_visited, currBB);
+        }
+    }
+
+    return ubinsts;
+}
+
+std::vector<Instruction *> Ubouch::getUb(Function &F) {
+    std::vector<Instruction *> allocas = getAllocas(F);
+    std::vector<Instruction *> ubinsts;
+
+    errs() << "[+] Checking " << F.getName() << '\n';
+
+    for (size_t i = 0; i < allocas.size(); i++) {
+        std::vector<Instruction *> allocaub = getAllocaUb(allocas[i], F);
+        vec_append<Instruction *>(ubinsts, allocaub);
     }
 
     return ubinsts;
