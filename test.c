@@ -2,13 +2,13 @@
 
 void dummy(int *x) {}
 
-void func(void)
+void simple(void)
 {
     int x;
     int y = x + 1;
 }
 
-void func2(void)
+void unsure(void)
 {
     int x;
     int z = x;
@@ -16,7 +16,7 @@ void func2(void)
     int y = x + 1;
 }
 
-void fun(void)
+void paths(void)
 {
     int x;
     int y = 0;
@@ -28,8 +28,19 @@ void fun(void)
     y += x;
 }
 
+void paths_unsure(void)
+{
+    int x;
+    int y = 0;
+
+    while (y == 1) {
+        dummy(&x); 
+    }
+
+    y += x;
+}
+
 int main(int argc, const char **argv)
 {
-    fun();
     return 0;
 }
