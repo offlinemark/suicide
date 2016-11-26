@@ -21,7 +21,7 @@ choice of hard drive erasing shell command.
 
 (slightly out of date)
 
-[![asciicast](https://asciinema.org/a/1mxq4b0kfdx48djx6wk7mg8d9.png)](https://asciinema.org/a/1mxq4b0kfdx48d9)
+[![asciicast](https://asciinema.org/a/42649.png)](https://asciinema.org/a/42649)
 
 ## building
 
