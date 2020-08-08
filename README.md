@@ -1,7 +1,7 @@
 # suicide cc
 
 A common illustrative example of something undefined behavior in C can do
-is "delete your hard drive". Suicide CC is a
+is "format your hard drive". Suicide CC is a
 LLVM pass which implements this.
 
 The scope of detected undefined behavior is simply local uses of uninitialized
