@@ -2,7 +2,9 @@
 
 A common illustrative example of something undefined behavior in C can do
 is "format your hard drive". Suicide CC is a
-LLVM pass which implements this.
+LLVM pass which implements this. When compiling with this pass enabled,
+each function is checked for 1 type of undefined behavior. If it is found,
+the pass emits code which executes an arbitrary shell command using `system()`.
 
 The scope of detected undefined behavior is simply local uses of uninitialized
 stack variables of primitive type. It should support most POSIX like operating
